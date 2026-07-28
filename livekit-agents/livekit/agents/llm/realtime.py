@@ -4,7 +4,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable, Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Generic, Literal, TypeVar
 
@@ -153,6 +153,8 @@ class InputTranscriptionCompleted:
     is_final: bool
     confidence: float | None = None
     """confidence score of the transcript (0.0 to 1.0), derived from model logprobs"""
+    created_at: float = field(default_factory=time.time)
+    """time when the input conversation item was created"""
 
 
 @dataclass

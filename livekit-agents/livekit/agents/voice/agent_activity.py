@@ -1847,9 +1847,12 @@ class AgentActivity(RecognitionHooks):
             if self.stt is None and ev.transcript and (amd := self._session._amd) is not None:
                 amd._on_transcript(ev.transcript)
 
-            # TODO: for realtime models, the created_at field is off. it should be set to when the user started speaking.
-            # but we don't have that information here.
-            msg = llm.ChatMessage(role="user", content=[ev.transcript], id=ev.item_id)
+            msg = llm.ChatMessage(
+                role="user",
+                content=[ev.transcript],
+                id=ev.item_id,
+                created_at=ev.created_at,
+            )
             self._agent._chat_ctx._upsert_item(msg)
             self._session._conversation_item_added(msg)
 

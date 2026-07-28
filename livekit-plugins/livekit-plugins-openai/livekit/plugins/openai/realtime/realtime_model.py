@@ -866,6 +866,7 @@ class RealtimeSession(
 
         # accumulates partial input-audio transcripts per (item_id, content_index)
         self._input_transcript_accumulators: dict[str, dict[int, str]] = {}
+        self._input_speech_started_at = utils.BoundedDict[str, float](maxsize=100)
 
         self._current_generation: _ResponseGeneration | _DiscardedGeneration | None = None
         self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
@@ -915,6 +916,7 @@ class RealtimeSession(
             old_chat_ctx = self._remote_chat_ctx
             self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
             self._input_transcript_accumulators.clear()
+            self._input_speech_started_at.clear()
             events.extend(self._create_update_chat_ctx_events(chat_ctx))
 
             try:
@@ -1760,8 +1762,9 @@ class RealtimeSession(
             yield frame
 
     def _handle_input_audio_buffer_speech_started(
-        self, _: InputAudioBufferSpeechStartedEvent
+        self, event: InputAudioBufferSpeechStartedEvent
     ) -> None:
+        self._input_speech_started_at[event.item_id] = time.time()
         self.emit("input_speech_started", llm.InputSpeechStartedEvent())
 
     def _handle_input_audio_buffer_speech_stopped(
@@ -1885,6 +1888,7 @@ class RealtimeSession(
         assert event.item_id is not None, "item_id is None"
 
         self._input_transcript_accumulators.pop(event.item_id, None)
+        self._input_speech_started_at.pop(event.item_id, None)
 
         try:
             self._remote_chat_ctx.delete(event.item_id)
@@ -1913,7 +1917,10 @@ class RealtimeSession(
         self.emit(
             "input_audio_transcription_completed",
             llm.InputTranscriptionCompleted(
-                item_id=event.item_id, transcript=accumulated, is_final=False
+                item_id=event.item_id,
+                transcript=accumulated,
+                is_final=False,
+                created_at=self._input_speech_started_at.get(event.item_id, time.time()),
             ),
         )
 
@@ -1930,6 +1937,7 @@ class RealtimeSession(
         self, event: ConversationItemInputAudioTranscriptionCompletedEvent
     ) -> None:
         self._clear_transcript_accumulator(event.item_id, event.content_index or 0)
+        created_at = self._input_speech_started_at.pop(event.item_id, time.time())
 
         confidence = calculate_confidence_from_logprobs(event.logprobs)
 
@@ -1945,6 +1953,7 @@ class RealtimeSession(
                 transcript=event.transcript,
                 is_final=True,
                 confidence=confidence,
+                created_at=created_at,
             ),
         )
 
@@ -1957,13 +1966,17 @@ class RealtimeSession(
         )
 
         # close any open partial stream so consumers waiting for is_final don't hang
+        created_at = self._input_speech_started_at.pop(event.item_id, time.time())
         partial = self._clear_transcript_accumulator(event.item_id, event.content_index or 0)
         if partial is None:
             return
         self.emit(
             "input_audio_transcription_completed",
             llm.InputTranscriptionCompleted(
-                item_id=event.item_id, transcript=partial, is_final=True
+                item_id=event.item_id,
+                transcript=partial,
+                is_final=True,
+                created_at=created_at,
             ),
         )
 

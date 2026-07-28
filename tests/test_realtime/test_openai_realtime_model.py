@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +12,57 @@ from livekit.agents.llm.remote_chat_context import RemoteChatContext
 from livekit.plugins.openai.realtime.realtime_model import RealtimeSession, _is_fatal_error
 
 pytestmark = pytest.mark.unit
+
+
+def test_input_transcripts_keep_their_speech_start_time() -> None:
+    emitted: list[tuple[str, object]] = []
+    session = cast(
+        RealtimeSession,
+        SimpleNamespace(
+            _input_speech_started_at={},
+            _remote_chat_ctx=RemoteChatContext(),
+            _clear_transcript_accumulator=lambda item_id, content_index: None,
+            emit=lambda name, event: emitted.append((name, event)),
+        ),
+    )
+
+    with patch(
+        "livekit.plugins.openai.realtime.realtime_model.time.time",
+        side_effect=[100.0, 250.0, 999.0, 999.0],
+    ):
+        RealtimeSession._handle_input_audio_buffer_speech_started(
+            session, SimpleNamespace(item_id="user-1")
+        )
+        RealtimeSession._handle_input_audio_buffer_speech_started(
+            session, SimpleNamespace(item_id="user-2")
+        )
+        RealtimeSession._handle_conversion_item_input_audio_transcription_completed(
+            session,
+            SimpleNamespace(
+                item_id="user-2",
+                content_index=0,
+                transcript="second",
+                logprobs=None,
+            ),
+        )
+        RealtimeSession._handle_conversion_item_input_audio_transcription_completed(
+            session,
+            SimpleNamespace(
+                item_id="user-1",
+                content_index=0,
+                transcript="first",
+                logprobs=None,
+            ),
+        )
+
+    transcripts = [
+        event for name, event in emitted if name == "input_audio_transcription_completed"
+    ]
+    assert [(event.item_id, event.created_at) for event in transcripts] == [
+        ("user-2", 250.0),
+        ("user-1", 100.0),
+    ]
+    assert session._input_speech_started_at == {}
 
 
 def test_update_chat_ctx_deletes_empty_remote_items() -> None:

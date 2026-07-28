@@ -125,6 +125,55 @@ def test_realtime_user_input_transcription_preserves_item_id() -> None:
     assert captured_events[0].item_id == "item_123"
 
 
+def test_realtime_user_transcript_report_order_preserves_server_context_order() -> None:
+    class DummySession:
+        def __init__(self) -> None:
+            self._amd = None
+            self._chat_ctx = ChatContext.empty()
+            self._text_only = True
+
+        def _user_input_transcribed(self, ev: UserInputTranscribedEvent) -> None:
+            pass
+
+        def _conversation_item_added(self, message: ChatMessage) -> None:
+            self._chat_ctx.insert(message)
+
+    session = DummySession()
+    agent_chat_ctx = ChatContext.empty()
+    assistant = ChatMessage(
+        role="assistant",
+        content=["reply"],
+        id="assistant-1",
+        created_at=200.0,
+    )
+    user_placeholder = ChatMessage(
+        role="user",
+        content=[],
+        id="user-1",
+        created_at=300.0,
+    )
+    session._chat_ctx.insert(assistant)
+    agent_chat_ctx.insert(assistant)
+    agent_chat_ctx.insert(user_placeholder)
+
+    activity = object.__new__(AgentActivity)
+    activity._session = session
+    activity._agent = SimpleNamespace(_chat_ctx=agent_chat_ctx)
+
+    AgentActivity._on_input_audio_transcription_completed(
+        activity,
+        InputTranscriptionCompleted(
+            item_id="user-1",
+            transcript="hello",
+            is_final=True,
+            created_at=100.0,
+        ),
+    )
+
+    assert [item.id for item in agent_chat_ctx.items] == ["assistant-1", "user-1"]
+    assert [item.id for item in session._chat_ctx.items] == ["user-1", "assistant-1"]
+
+
 async def test_events_and_metrics() -> None:
     speed = 1
     actions = FakeActions()
