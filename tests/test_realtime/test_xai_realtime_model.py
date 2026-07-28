@@ -15,6 +15,7 @@ def _make_session() -> tuple[RealtimeSession, list[llm.InputTranscriptionComplet
     session = RealtimeSession.__new__(RealtimeSession)
     session._remote_chat_ctx = RemoteChatContext()  # type: ignore[attr-defined]
     session._input_transcript_accumulators = {}  # type: ignore[attr-defined]
+    session._input_speech_started_at = {}  # type: ignore[attr-defined]
 
     emitted: list[llm.InputTranscriptionCompleted] = []
     session.emit = lambda name, ev: emitted.append(ev)  # type: ignore[method-assign,assignment]
